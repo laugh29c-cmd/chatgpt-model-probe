@@ -193,7 +193,6 @@ SERVING / REASONING POLICY SHIFT = SUSPECTED
 ChatGPT_Model_Slug_Probe.user.js
 README.md
 docs/INSTALL_zh-CN.md
-dist/ChatGPT_Model_Probe_v1.4.0_bundle.zip
 ```
 
 ## Disclaimer
