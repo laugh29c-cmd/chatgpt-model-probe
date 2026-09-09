@@ -1,534 +1,99 @@
-# ChatGPT Model Probe｜Tampermonkey 安装与使用教程
+# ChatGPT Account Route Probe 1.5.1
 
-适用版本：`v1.4.0`
+这是 v1.5.0 的轻量试用修订。保留原版 Chrome Chat 的模型字段、计时和 Daily Ledger，扩展 Work 回包观察，并增加桌面本地回执窗口。不是后台真实模型的审计接口，也不改变账号、节点或模型路由。
 
-这个脚本只在 `https://chatgpt.com/*` 生效。它不通过 DOM、模型选择器或聊天文字猜模型，而是在页面网络层观察 ChatGPT 自己的 conversation 请求、SSE 返回和客户端 timing。
+## 最快开始：Chrome / Edge / Mac 浏览器
 
-v1.4.0 还会把每轮的“无正文统计记录”自动保存到浏览器本地 Daily Ledger，方便一天或多天以后统一分析。
+1. 在篡改猴中停用旧版探针。
+2. 导入 `ChatGPT_Model_Slug_Probe.user.js`，启用后刷新 ChatGPT 页面。原来的 IndexedDB 日志保留。
+3. 正常使用 Chat 或 Work。右下角可拖动、收缩；“观察”勾选框控制采集。收缩后仍显示返回模型字段与证据状态。
+4. 需要对照时，设置“对照标签”，例如 `账号A / 网线 / 节点1`；刚重新登录后点“标记刚登录”。标签不读取账号或认证信息。
+5. 使用一段时间后导出 JSON。JSON 包含完整诊断；CSV 是便于浏览的子集。
 
----
+不需要 Node、终端或桌面程序。已在使用篡改猴时，不要同时加载本包的 `extension`，避免重复观察。
 
-## 1. “油猴”是什么
+不使用篡改猴的 Chromium 浏览器可在扩展管理页开启开发者模式，加载 `extension` 文件夹。它只匹配 `https://chatgpt.com/*`，在页面主执行环境注入脚本。
 
-“油猴”通常指 **Tampermonkey**：一个浏览器 userscript 管理扩展。
+## Work 回执空白：新版增加什么
 
-userscript 可以指定只在哪些网站运行、什么时候注入。本脚本头部限定：
+- 保留 assistant metadata 和 `server_ste_metadata`；增加 Responses 响应信封、JSON-RPC 嵌套结果、显式 `model/rerouted` 事件和完整路径的模型 metadata 补丁。
+- 网页观察 fetch SSE / JSON / NDJSON，以及页面主执行环境中的 WebSocket、EventSource、完成后的 XHR。XHR 不声明逐字实时计时。
+- 每次请求保留事件数、事件类型、模型字段路径、解析缺失数、HTTP 状态和 Content-Type。不会保存一般 JSON 叶子值或聊天正文。
+- `其他 model 字段` 是回包中实际出现的候选字段，语义标记为 `NOT_VERIFIED`；不自动当成后台有效模型。
+- `requested_only` 表示目前只获得了请求模型；`metadata_unavailable` 表示没有得到已识别的模型证据。这两种情况都不是“正常路由 PASS”。
+- Worker、Service Worker、原生 IPC、另一个进程、其他域请求或后台未暴露的数据，不会因为注入了网页脚本就变得可见。遇到它们，先看诊断，不能承诺所有 Work 版本都能读到实际模型。
 
-```text
-@match   https://chatgpt.com/*
-@run-at  document-start
-@sandbox raw
-```
+## Windows / Mac 桌面回执
 
-也就是只在 ChatGPT 网页运行，并尽量在文档最早阶段 hook `fetch`。
-
----
-
-## 2. 安装 Tampermonkey
-
-在 Chrome / Chromium 系浏览器安装 Tampermonkey。
-
-安装后，如果工具栏没看到图标，可以打开浏览器扩展程序菜单，把 Tampermonkey 固定到工具栏。
-
----
-
-## 3. Chrome 必须开启「允许用户脚本」
-
-进入：
+在解压目录中运行，需要 Node.js 22 或更新版，无 npm 依赖：
 
 ```text
-Chrome
-→ 扩展程序
-→ 管理扩展程序
-→ Tampermonkey
-→ 详细信息
+node ChatGPT_Account_Route_Probe.mjs
 ```
 
-找到并开启：
+程序打印 `http://127.0.0.1:随机端口`，打开就是回执窗口。初始不附加任何目标。点击“查找目标”，选择当前已授权的页面或进程，再“连接”。可暂停、标记正常/可疑/漂移、设置网络标签和账号代号、导出 JSON。窗口支持手机尺寸布局，但这个本机地址不供另一台手机远程连接。
+
+- Windows 也有 `ChatGPT_Account_Route_Probe.ps1`。系统禁止执行 `.ps1` 时直接使用上述 `node` 命令，无需修改系统策略。
+- Mac 在终端运行 `zsh ChatGPT_Account_Route_Probe.command`。启动器不强制退出或重新启动 ChatGPT/Codex。
+- 指定已有调试端口：`node ChatGPT_Account_Route_Probe.mjs --cdp http://127.0.0.1:9223`。
+- 指定本地日志目录：`node ChatGPT_Account_Route_Probe.mjs --data-dir /your/local/path`。
+- Windows 的 Node 进程可用 Ctrl-C 停止。面板“暂停”会断开采集，面板自身仍保持打开。
+
+### 桌面 App 的前提
+
+目标程序必须支持并开启 Chromium CDP。对支持这些参数的 Electron/Chromium 应用，在正常退出应用后，可手动从终端使用实际可执行文件启动：
 
 ```text
-允许用户脚本
-Allow User Scripts
+"实际的应用可执行文件路径" --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222
 ```
 
-如果 Tampermonkey Dashboard 顶部出现蓝色提示要求开启用户脚本权限，直接按提示进入扩展设置打开即可。
+这不是所有 ChatGPT/Codex 版本都支持的公共契约。若 `/json/list` 不可用，面板会明确显示 `CDP_NOT_AVAILABLE`，不会自动改用私有凭据、重启应用或修改代理。开启本地调试端口会允许同机进程访问调试目标，用完应关闭该调试实例；不把端口开放到局域网。
 
-这个开关没开时，脚本可能看起来“已经保存并启用”，但实际不会注入 `chatgpt.com`。
+即使成功附加渲染进程，Codex 的实际模型请求也可能在主进程/独立 app-server 中完成。此时面板只显示它观察到的证据，不能把“无改路由事件”当成实际模型相同。原包的 CLI 主动测试是另一条测试请求，不能代表当前前台任务，本次发行不默认启动或循环调用它。
 
----
+桌面新版支持 CDP 实时流读取；不支持 `Network.streamResourceContent` 的程序会明确记为 `body_after_finish_only`。拿不到响应体会写 `body_unavailable`，不再静默吞掉失败。页面、Worker 都需要按目标明确选择，每个实例一次观察一个目标。
 
-## 4. Content Script API（有这个选项再设置）
+“浮窗”使用浏览器提供的 Document Picture-in-Picture；受支持的桌面 Chromium 浏览器中可独立浮在其他应用上方。不支持的客户端保留普通窗口和收缩视图。Codex 中可把本地 URL 打开在浏览器侧栏，它是本地探针的回执页面，不是 Codex 原生工具栏插件。
 
-部分 Tampermonkey / Chrome 版本会提供：
+## iPhone / iPad
 
-```text
-Tampermonkey Dashboard
-→ Settings / 设置
-→ Config mode / 配置模式：Advanced / 高级
-→ Content Script API
-```
+使用 Safari + Userscripts 扩展，在 Userscripts 设定的脚本目录中安装同一份 `.user.js`，为 `chatgpt.com` 授权，并在 Safari 中重新打开网页。只需授权这个站点。支持页面内浮窗和收缩。
 
-如果存在，可以优先使用支持及时 `document-start` 的 UserScripts API 模式，例如：
+这是手机网页采集方案；不注入官方 ChatGPT iOS App，不提供跨 App 的通用系统悬浮窗。无独立原生 App、后台 VPN 或证书安装。
 
-```text
-UserScripts API Dynamic
-```
+官方项目安装步骤：[Userscripts](https://github.com/quoid/userscripts#usage)。本轮没有连接 iPhone/iPad 真机，Safari 注入及站点策略兼容性仍待实机试用。
 
-不同版本名称可能不同。没有这项时，不要卡在这里，先按后面的步骤实际安装测试。
+## Android
 
----
+使用支持用户脚本扩展的浏览器，例如 Firefox Android + Tampermonkey，导入同一份 `.user.js`，在浏览器内打开 ChatGPT。不要假设 Android 默认 Chrome 与桌面 Chrome 拥有相同扩展能力。
 
-## 5. 安装 ChatGPT Model Probe
+这是 Android 网页采集方案，不读取官方 Android App 的内部网络流量。系统级悬浮窗是另一种原生 App 功能，不等于取得模型字段；本包不申请该权限。
 
-### 方法 A：Tampermonkey 里直接粘贴
+扩展入口：[Tampermonkey](https://www.tampermonkey.net/index.php?browser=firefox)。本轮 Android 真机未验证。
 
-```text
-Tampermonkey
-→ Dashboard / 管理面板
-→ + / 添加新脚本
-```
+## 网络、账号与“30~60 分钟后变化”的对照
 
-把编辑器默认内容全部删掉。
+- 网页：online、连接类型（若浏览器提供）、effectiveType、RTT/下行估计、网络变化次数、请求开始/结束时快照、探针运行时长、人工登录标记、对照标签。
+- Windows：启用接口类型、链路速度、IPv4/IPv6 可用性、网关/DNS/路由表/系统代理配置的摘要 ID。无需 WMI 管理员权限。
+- Mac：默认路由接口和路由/DNS/系统代理摘要。接口名不能单独证明 Wi-Fi/网线类型。
+- 桌面快照按请求触发、缓存 15 秒；不是后台持续轮询。网关/DNS/代理地址不写入日志，SSID、MAC、账号邮箱、cookies、tokens 不采集。
+- `effectiveType=4g` 是网络质量等级，不代表手机流量；接口启用不代表这条连接的实际出口；远端服务器地址摘要不代表本机公网出口。
+- 不自动查询公网 IP、代理节点名称、套餐配额、账号年龄或完整登录时间。这些字段保持未知，节点/账号使用代号人工标记。
 
-打开仓库根目录：
+推荐在同一账号、相同请求模型和同一节点下先比较网线/Wi-Fi，再固定网络比较其他因素。对每轮用“正常/可疑/明显漂移”标记体验，并保留原始模型字段。一次网络切换的时间相关性不能证明因果。没有官方材料确认“新登录固定一小时后必然路由到 5.5 mini”，本包不会通过换号、反复登录或保活尝试规避路由。
 
-```text
-ChatGPT_Model_Slug_Probe.user.js
-```
+官方说明区分产品入口、认证方式和 workspace 的模型权限：[Workspace model availability](https://learn.chatgpt.com/docs/enterprise/workspace-model-availability)。模型选择不等于实际返回模型；当前探针只证明客户端可见字段。
 
-复制全部代码粘进去，然后保存：
+## 资源边界与验证
 
-- macOS：`⌘S`
-- Windows：`Ctrl+S`
+网页：每个流最多观察 8 MB；单个流事件最多 256 KB；JSON 响应最多 2 MB；请求体最多解析 128 KB。超限停止本次观察，原回复继续。活跃时 UI 至多每秒刷新一次，页面隐藏时暂停计时刷新。日志最多 1000 条，超过 14 天的记录启动时清理；高频重复传输事件去重、每秒最多存 4 条。
 
-回到：
+桌面：最多 64 个 HTTP 请求和 32 个 WebSocket 元数据状态；每次最多 4 秒 CDP 命令等待；内存最多 1000 条回执，面板最多展示 100 条；日志约 2 MB 时滚动保留近期记录。没有定时模型测试、测速、账号保活、全盘扫描或远端上传。
 
-```text
-https://chatgpt.com/
-```
+本轮通过：解析器定向测试；Chromium 实际浏览器中的 Chat/Work 模拟回包、停止观察不打断回复、正文不入日志、小屏布局；实际 CDP 长连接结束前收到模型回执；本地窗口、导入、开关、浮窗、来源/控制令牌校验；本机 Windows 网络摘要读取。
 
-整页刷新一次。
+未验证：用户账号实际 Work 回包、ChatGPT/Codex 原生进程覆盖、Mac/iPhone/iPad/Android 真机。它们是本包的实机试用项，不能以本地测试代替。
 
-### 方法 B：Raw 页面安装
+开发验证：`node --test tests/core.test.mjs`。浏览器测试使用 Playwright，仅开发验证需要它；日常运行无 npm 依赖。
 
-打开 `.user.js` 的 GitHub Raw 页面。如果浏览器和 Tampermonkey 正常识别 userscript，会出现安装确认页。
-
-如果没有自动弹出，就使用方法 A。
-
----
-
-## 6. 怎么确认已经运行
-
-刷新 ChatGPT 后，页面应该出现悬浮窗：
-
-```text
-ChatGPT metadata · v1.4.0
-```
-
-看到它代表 userscript 注入 PASS。
-
-还没新发消息时字段显示 `—` 是正常的。
-
----
-
-## 7. 悬浮窗怎么移动 / 收起
-
-按住顶部：
-
-```text
-ChatGPT metadata · v1.4.0
-```
-
-可以拖动到屏幕其他位置。
-
-右上角：
-
-```text
-收起 / 展开
-```
-
-脚本会在 `localStorage` 里只保存：
-
-```text
-悬浮窗位置
-收起/展开状态
-```
-
----
-
-## 8. 正常测试一轮
-
-刷新以后正常发一句话，例如：
-
-```text
-1
-```
-
-等回复结束，看面板：
-
-```text
-requested (body.model)
-message.model_slug
-resolved_model_slug
-server STE model_slug
-```
-
-以及：
-
-```text
-响应头到达
-首数据块（非 TTFT）
-首段文本（含可见思考）
-首段正文（TTFT 近似）
-本轮耗时
-正文速度（近似）
-已识别正文字符
-SSE 数据速率（含协议）
-```
-
----
-
-## 9. 四个模型字段是什么意思
-
-### requested (body.model)
-
-本轮 conversation POST 请求中客户端提交的 `body.model`。
-
-它只能回答“客户端请求了什么”。
-
-### message.model_slug
-
-assistant message metadata 里的：
-
-```text
-metadata.model_slug
-```
-
-### resolved_model_slug
-
-如果当前 response/message metadata 返回：
-
-```text
-resolved_model_slug
-```
-
-脚本显示它。
-
-字段不存在时显示 `—`，不会拿别的字段填充。
-
-### server STE model_slug
-
-脚本显式识别：
-
-```json
-{
-  "type": "server_ste_metadata",
-  "metadata": {
-    "model_slug": "..."
-  }
-}
-```
-
-也兼容 SSE 把 `server_ste_metadata` 放在 `event:` 名称里的形式。
-
-这是当前客户端可见模型证据里最值得重点观察的一项，但仍然属于“服务器主动向客户端报告的 metadata”，不是底层 inference worker 的密码学证明。
-
----
-
-## 10. 怎么读 mismatch
-
-例如：
-
-```text
-requested                gpt-a
-message.model_slug       gpt-a
-resolved_model_slug      gpt-a
-server STE model_slug    gpt-b
-```
-
-说明本轮出现客户端可观察到的 metadata mismatch，值得进一步调查。
-
-如果四项一致，只能说明：
-
-> 当前客户端可见字段没有发现显式 slug mismatch。
-
-不能进一步证明服务器内部绝对不存在其它 routing、serving、reasoning allocation 或执行策略变化。
-
----
-
-## 11. v1.4.0 Daily Ledger 是什么
-
-从 v1.4.0 开始，每轮结束后，脚本会自动向浏览器本地 **IndexedDB** 写入一条记录。
-
-不会保存聊天正文。
-
-记录字段包括：
-
-```text
-timestamp
-ended_at
-local_day
-session_turn
-conversation_id
-
-requested_model
-message_model_slug
-resolved_model_slug
-server_ste_model_slug
-slug_mismatch
-ste_mismatch
-
-headers_ms
-first_byte_ms
-first_text_ms
-first_answer_ms
-total_ms
-
-answer_chars
-chars_per_sec
-sse_kib_per_sec
-parse_misses
-text_stats_complete
-status
-behavior_label
-```
-
-默认只保留最近 **14 天**，旧数据会自动清理。
-
-注意：升级 v1.4.0 之前没有被记录的旧轮次，脚本无法从浏览器历史中还原出当时完整 timing；Ledger 从安装 v1.4.0 后开始积累。
-
----
-
-## 12. 怎么看“今日 Ledger”
-
-面板底部会显示类似：
-
-```text
-今日 Ledger · 2026-09-07 · 27 轮 · mismatch 1 · STE mismatch 1 · 标记异常 4
-```
-
-其中：
-
-- `mismatch`：本轮可比较的 model identifier 存在差异
-- `STE mismatch`：STE 与请求/resolve/message 基线至少一项不同
-- `标记异常`：人工打了“可疑”或“明显漂移”的轮数
-
----
-
-## 13. 怎么人工标记“今天这轮不对劲”
-
-回复完成并写入 Ledger 后，面板会出现：
-
-```text
-正常
-可疑
-明显漂移
-```
-
-按你的体感标记即可。
-
-推荐标准：
-
-### 正常
-
-判断力、上下文、约束跟随和工程主线都在正常区间。
-
-### 可疑
-
-出现明显变浅、漏约束、机械复述、过度顺从、风格突然漂移等情况，但还不足以下结论。
-
-### 明显漂移
-
-出现非常明显的连续性/判断能力变化，足以作为后续统计中的强行为标签。
-
-标签只是人工证据，不等于自动证明发生了 routing。
-
----
-
-## 14. 怎么导出一天数据
-
-面板提供：
-
-```text
-导出今日 JSON
-CSV
-复制今日摘要
-```
-
-### JSON
-
-最适合后续交给 ChatGPT、Python、R 或其它统计工具分析。包含字段完整、类型不会因为 CSV 文本化丢失。
-
-文件名类似：
-
-```text
-chatgpt-model-probe_2026-09-07.json
-```
-
-### CSV
-
-适合 Excel / Numbers / Google Sheets。
-
-### 复制今日摘要
-
-会复制类似：
-
-```text
-ChatGPT Model Probe · 2026-09-07
-turns: 42
-slug mismatch: 1
-STE mismatch: 1
-behavior suspicious/drift: 7
-parse-miss turns: 4
-median TTFT: 8.21 s
-median total: 26.40 s
-median chars/s: 98.2
-```
-
----
-
-## 15. 导出文件有没有隐私信息
-
-没有聊天正文，但 JSON / CSV **会包含 `conversation_id`**。
-
-这个 id 本身不是聊天文本，但仍然属于会话标识。若要公开发布原始数据，建议先删除或哈希 `conversation_id`。
-
-脚本本身不会把这些数据上传到任何服务器。
-
----
-
-## 16. 怎么清空日志
-
-点：
-
-```text
-清空日志
-```
-
-会弹确认框。
-
-确认以后只会清除 ChatGPT Model Probe 自己在 IndexedDB 里的本地 Ledger，不会删除 ChatGPT 对话。
-
----
-
-## 17. Timing 怎么看
-
-### 响应头到达
-
-客户端发起 fetch 到拿到 Response headers 的时间。
-
-### 首数据块（非 TTFT）
-
-脚本 clone 的 SSE response 第一次读到字节块。
-
-不是首 token。
-
-### 首段文本（含可见思考）
-
-parser 第一次识别 assistant text。
-
-### 首段正文（TTFT 近似）
-
-parser 第一次识别 final answer 正文。
-
-只能作为客户端近似 TTFT。
-
-### 正文速度（近似）
-
-Unicode 字符/s，不是 tokens/s。
-
-### SSE 数据速率
-
-整个 SSE 数据流的 KiB/s，包含协议、metadata 等，不是模型生成速度。
-
----
-
-## 18. “存在未解析事件”是什么意思
-
-如果出现：
-
-```text
-存在未解析事件，文本统计可能不完整
-```
-
-说明当前 SSE 中有 parser 没有完整重建的 patch/event。
-
-这种轮次：
-
-- 模型 metadata 仍可能有效
-- 但正文字符数、正文速度、TTFT 要降权
-- Ledger 会写 `parse_misses > 0`
-- `text_stats_complete = false`
-
-做长期统计时，建议把这些轮次的文本类 timing 单独排除或降权。
-
----
-
-## 19. 真正分析“是否发生路由”时怎么用
-
-不要拿单轮速度下结论。
-
-建议至少积累 20–50 个相似任务轮次，优先看：
-
-```text
-1. STE / resolved / message 是否出现显式 slug mismatch
-2. mismatch 是否和“可疑/明显漂移”行为标签共现
-3. slug 一致时，可疑样本是否形成另一套 TTFT / total / chars/s 分布
-4. parser miss 轮次是否污染统计
-5. 单轮异常最后再看
-```
-
-如果 slug 一直一致，但异常行为稳定形成另一套性能 cluster，更准确的表达是：
-
-```text
-MODEL SLUG ROUTING = NOT OBSERVED
-SERVING / REASONING POLICY SHIFT = SUSPECTED
-```
-
-而不是凭体感指定一个没有 metadata 支持的具体模型。
-
----
-
-## 20. 常见问题
-
-### 刷新后完全没有悬浮窗
-
-检查：
-
-1. Tampermonkey 是否启用
-2. 当前 userscript 是否启用
-3. Chrome「允许用户脚本」是否打开
-4. 当前网址是不是 `https://chatgpt.com/`
-5. 保存脚本后有没有整页刷新
-
-### 悬浮窗有，但字段全是 `—`
-
-先新发一轮消息。历史会话不保证具备全部字段。
-
-### resolved_model_slug 是 `—`
-
-字段本身可能没返回，不等于脚本坏了。
-
-### server STE 一直是 `—`
-
-当前轮可能没返回该 event，也可能 ChatGPT 更改了 SSE schema。
-
-### Daily Ledger 显示 0
-
-v1.4.0 只从升级后新产生的回复开始记录，不会补录之前的 timing 历史。
-
-### 面板挡屏幕
-
-拖顶部标题，或者点「收起」。
-
----
-
-## 21. 一句话理解这个工具
-
-它不是模型测谎仪。
-
-更准确地说，它是一个：
-
-> **ChatGPT 客户端模型 metadata + SSE timing + 本地连续留证黑匣子。**
-
-单轮负责看发生了什么，Daily Ledger 负责回答“今天/这几天是否出现了稳定分档或共现”。
+参考：[Document Picture-in-Picture](https://developer.chrome.com/docs/web-platform/document-picture-in-picture)。

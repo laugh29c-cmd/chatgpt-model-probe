@@ -1,0 +1,7 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPT Account Route Probe",
+  "version": "1.5.1",
+  "description": "Local model metadata receipts for ChatGPT Chat and Work.",
+  "content_scripts": [{"matches": ["https://chatgpt.com/*"], "js": ["probe.js"], "run_at": "document_start", "world": "MAIN", "all_frames": false}]
+}
